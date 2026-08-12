@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Quick Pick (Forms)
 // @namespace    matt-family-med-stratford
-// @version      0.6.0
+// @version      0.7.0
 // @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, HPV & cytology cervical screening, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -36,16 +36,21 @@
    4. Then, per form:
         - Bloodwork: clicks the matching template to open it, then STOPS —
           you review and click Apply/Continue yourself.
-        - Imaging, Work and School Note MMD: click the matching template AND
-          the confirm/auto-populate button, landing you on the populated
-          form ready for review.
+        - Imaging: clicks the matching template, pre-selects "HPHA XR" as
+          the fax recipient inside the auto-populate dialog (so the later
+          fax step is already populated with the correct number instead of
+          needing a manual search), then clicks Apply.
+        - Work and School Note MMD: click the matching template AND the
+          confirm/auto-populate button, landing you on the populated form
+          ready for review.
         - HPV & Cytology Cervical Screening (ON): click the matching
           template, then select the "MMD" preset option in the
           auto-populate dialog, THEN click the confirm/auto-populate
           button — one extra required step versus the other auto-populate
           forms.
-      No path signs or submits any order — each only opens/pre-fills a form
-      for you to review and complete yourself.
+      No path signs or submits any order, and none of this sends the fax
+      itself — the recipient is only pre-filled; you still review and send
+      it yourself.
 
  ONE WEAKER SPOT WORTH WATCHING: the shared "auto-populate & continue"
  button (used by imaging, the MMD note, and the HPV/cytology requisition)
@@ -55,7 +60,10 @@
  label via a "value" attribute, which wasn't captured). It's still
  protected by the same "only click if there's exactly one visible match"
  rule, but pay extra attention to this specific step the first several
- times you test any of those three forms.
+ times you test any of those three forms. The imaging recipient search
+ (typing "xr" and picking "HPHA XR") has the same protection as everything
+ else here, but is worth double-checking the first several runs too, since
+ it's new and involves typing into a second search box mid-flow.
 
  TEST IN YOUR TRAINING ENVIRONMENT FIRST, with the console open (F12),
  before relying on this during a real patient day. Adding another form later
@@ -100,6 +108,13 @@
  (ON)". Its auto-populate dialog also requires selecting an "MMD" preset
  option before Apply, which the script now does automatically as part of
  this pick — that step doesn't apply to imaging or the school note.
+
+ CHANGED (0.7.0): imaging (Alt+6) now pre-selects "HPHA XR" as the fax
+ recipient inside its auto-populate dialog, before clicking Apply — this
+ was previously skipped entirely. That means once the requisition is
+ populated, the fax step is already pointed at the correct number instead
+ of needing a manual recipient search later. Nothing is faxed by this
+ script; only the recipient field is pre-filled for you to review.
 =====================================================================================
 */
 
@@ -210,6 +225,38 @@
           '"MMD" preset option'
         ),
     },
+    imagingChangeRecipient: {
+      label: '"No Recipient Selected" fax-recipient button (imaging auto-populate panel)',
+      // "embos" is a domain-specific styling class (not a generic reused
+      // one like "btn"), so pairing it with the exact-text filter is extra
+      // safe. "hover"/"active" from the capture are transient click-state
+      // classes and are deliberately left out.
+      find: () =>
+        uniqueAmongOrThrow(
+          Array.from(document.querySelectorAll('a.change-recipient.embos')).filter(
+            (el) => el.textContent && el.textContent.trim() === 'No Recipient Selected'
+          ),
+          '"No Recipient Selected" fax-recipient button'
+        ),
+    },
+    imagingRecipientSearchInput: {
+      label: 'Fax-recipient search box (imaging auto-populate panel)',
+      find: () =>
+        uniqueAmongOrThrow(
+          document.querySelectorAll('div.ih-search-selector input.search-field[type="text"][name="value"]'),
+          'Fax-recipient search box'
+        ),
+    },
+    imagingRecipientResult: {
+      label: '"HPHA XR" fax recipient result',
+      find: () =>
+        uniqueAmongOrThrow(
+          Array.from(document.querySelectorAll('div.item-title.truncate')).filter(
+            (el) => el.textContent && el.textContent.trim() === 'HPHA XR'
+          ),
+          '"HPHA XR" fax recipient result'
+        ),
+    },
     // Shared by any form whose "auto-populate & continue" dialog uses this
     // generic submit button (currently imaging, MMD note, and cytology).
     // Deliberately matches only on the stable classes — "hover"/"active"
@@ -312,6 +359,20 @@
   }
 
   // ===================================================================
+  // Shared flow: pre-select a fax recipient inside a form's auto-populate
+  // dialog, before hitting Apply — used so the fax step later doesn't need
+  // its own manual recipient search.
+  // ===================================================================
+  async function selectFaxRecipient(recipientDef) {
+    await clickWhenReady(recipientDef.changeButton);
+    const searchEl = await waitFor(recipientDef.searchInput.find);
+    setStatus(`Typing recipient search: "${recipientDef.searchText}" …`);
+    setReactiveInputValue(searchEl, recipientDef.searchText);
+    await new Promise((r) => setTimeout(r, 600)); // let the live filter settle
+    await clickWhenReady(recipientDef.result);
+  }
+
+  // ===================================================================
   // Quick picks — add more forms here later, same shape each time
   // ===================================================================
   const QUICK_PICKS = [
@@ -329,6 +390,14 @@
       hotkey: '6',
       searchText: 'imaging - xray/us/bmd',
       autoSelectResult: SELECTORS.imagingResult, // proceeds automatically
+      autoRecipient: {
+        // Pre-selects "HPHA XR" as the fax recipient so the later fax step
+        // is already populated with the correct number.
+        changeButton: SELECTORS.imagingChangeRecipient,
+        searchInput: SELECTORS.imagingRecipientSearchInput,
+        searchText: 'xr',
+        result: SELECTORS.imagingRecipientResult,
+      },
       autoConfirm: SELECTORS.autoPopulateConfirm,
     },
     {
@@ -360,6 +429,9 @@
         return;
       }
       await clickWhenReady(pick.autoSelectResult);
+      if (pick.autoRecipient) {
+        await selectFaxRecipient(pick.autoRecipient);
+      }
       if (pick.autoPreset) {
         await clickWhenReady(pick.autoPreset);
       }
