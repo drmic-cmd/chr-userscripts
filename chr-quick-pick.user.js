@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Quick Pick (Forms)
 // @namespace    matt-family-med-stratford
-// @version      0.7.1
+// @version      0.7.2
 // @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, HPV & cytology cervical screening, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -122,6 +122,15 @@
  The imaging pick now explicitly clicks "Facility" before searching, or
  "xr" would have searched the wrong database and found nothing (or the
  wrong entry).
+
+ CHANGED (0.7.2): fix — the fax-recipient search box wasn't returning any
+ results ("xr" appeared in the box, but the dropdown stayed empty and the
+ script timed out waiting for it). That search box only triggers its
+ lookup off real keystroke events, not the single instant value-set used
+ elsewhere in this script. It now types into that one box character-by-
+ character with real keydown/keypress/keyup events, the same as typing by
+ hand — this only affects the fax-recipient search; the template search
+ box (which was already working) is unchanged.
 =====================================================================================
 */
 
@@ -354,6 +363,29 @@
     inputEl.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  // Some CHR search boxes only trigger their AJAX lookup off real keystroke
+  // events (keydown/keyup), not off a single instant value-set — so this
+  // types one character at a time with proper keyboard events in between,
+  // the same way typing by hand would. Slower, but it's what those boxes
+  // actually need to see.
+  async function typeLikeAKeyboard(inputEl, text, perCharDelayMs = 130) {
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    inputEl.focus();
+    nativeSetter.call(inputEl, '');
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    let current = '';
+    for (const ch of text) {
+      inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
+      inputEl.dispatchEvent(new KeyboardEvent('keypress', { key: ch, bubbles: true }));
+      current += ch;
+      nativeSetter.call(inputEl, current);
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+      inputEl.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
+      await new Promise((r) => setTimeout(r, perCharDelayMs));
+    }
+    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
   // ===================================================================
   // Shared flow: get to the template search box, type the search text
   // ===================================================================
@@ -393,10 +425,14 @@
     }
     const searchEl = await waitFor(recipientDef.searchInput.find);
     setStatus(`Typing recipient search: "${recipientDef.searchText}" …`);
-    setReactiveInputValue(searchEl, recipientDef.searchText);
-    await new Promise((r) => setTimeout(r, 600)); // let the live filter settle
+    // This box needs real per-keystroke events to trigger its AJAX lookup
+    // (an instant value-set left it showing the text with no results) — see
+    // the 0.7.2 note in the header.
+    await typeLikeAKeyboard(searchEl, recipientDef.searchText);
+    await new Promise((r) => setTimeout(r, 900)); // let the AJAX lookup return
     await clickWhenReady(recipientDef.result);
   }
+
 
   // ===================================================================
   // Quick picks — add more forms here later, same shape each time
