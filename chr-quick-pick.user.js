@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Quick Pick (Forms)
 // @namespace    matt-family-med-stratford
-// @version      0.7.0
+// @version      0.7.1
 // @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, HPV & cytology cervical screening, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -36,10 +36,11 @@
    4. Then, per form:
         - Bloodwork: clicks the matching template to open it, then STOPS —
           you review and click Apply/Continue yourself.
-        - Imaging: clicks the matching template, pre-selects "HPHA XR" as
-          the fax recipient inside the auto-populate dialog (so the later
-          fax step is already populated with the correct number instead of
-          needing a manual search), then clicks Apply.
+        - Imaging: clicks the matching template, opens the fax-recipient
+          search, switches from the default "Contact" tab to "Facility",
+          pre-selects "HPHA XR" as the recipient (so the later fax step is
+          already populated with the correct number instead of needing a
+          manual search), then clicks Apply.
         - Work and School Note MMD: click the matching template AND the
           confirm/auto-populate button, landing you on the populated form
           ready for review.
@@ -115,6 +116,12 @@
  populated, the fax step is already pointed at the correct number instead
  of needing a manual recipient search later. Nothing is faxed by this
  script; only the recipient field is pre-filled for you to review.
+
+ CHANGED (0.7.1): correction — the fax-recipient search defaults to a
+ "Contact" tab, not the "Facility" one the correct address lives under.
+ The imaging pick now explicitly clicks "Facility" before searching, or
+ "xr" would have searched the wrong database and found nothing (or the
+ wrong entry).
 =====================================================================================
 */
 
@@ -247,6 +254,19 @@
           'Fax-recipient search box'
         ),
     },
+    imagingFacilityTab: {
+      label: '"Facility" tab (fax-recipient search — defaults to "Contact" otherwise)',
+      // Matched on the stable classes only; "hover"/"active" from the
+      // capture are transient click-state classes, not part of its
+      // identity, so they're deliberately left out.
+      find: () =>
+        uniqueAmongOrThrow(
+          Array.from(document.querySelectorAll('div.hoverable.activatable.selectable-resource')).filter(
+            (el) => el.textContent && el.textContent.trim() === 'Facility'
+          ),
+          '"Facility" tab'
+        ),
+    },
     imagingRecipientResult: {
       label: '"HPHA XR" fax recipient result',
       find: () =>
@@ -365,6 +385,12 @@
   // ===================================================================
   async function selectFaxRecipient(recipientDef) {
     await clickWhenReady(recipientDef.changeButton);
+    if (recipientDef.tab) {
+      // The search defaults to the "Contact" tab — switch to "Facility"
+      // (or whichever tab is configured) before it opens, or the search
+      // hits the wrong address database entirely.
+      await clickWhenReady(recipientDef.tab);
+    }
     const searchEl = await waitFor(recipientDef.searchInput.find);
     setStatus(`Typing recipient search: "${recipientDef.searchText}" …`);
     setReactiveInputValue(searchEl, recipientDef.searchText);
@@ -394,6 +420,7 @@
         // Pre-selects "HPHA XR" as the fax recipient so the later fax step
         // is already populated with the correct number.
         changeButton: SELECTORS.imagingChangeRecipient,
+        tab: SELECTORS.imagingFacilityTab, // must switch off the default "Contact" tab first
         searchInput: SELECTORS.imagingRecipientSearchInput,
         searchText: 'xr',
         result: SELECTORS.imagingRecipientResult,
