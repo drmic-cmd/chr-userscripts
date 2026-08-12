@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         CHR Quick Pick (Forms)
 // @namespace    matt-family-med-stratford
-// @version      0.5.0
-// @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, cytology & HPV requisition, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
+// @version      0.6.0
+// @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, HPV & cytology cervical screening, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
 // @match        https://*.chr.md/*
@@ -36,15 +36,19 @@
    4. Then, per form:
         - Bloodwork: clicks the matching template to open it, then STOPS —
           you review and click Apply/Continue yourself.
-        - Imaging, Work and School Note MMD, Alpha Labs Cytology & HPV
-          Requisition: click the matching template AND the confirm/
-          auto-populate button, landing you on the populated form ready
-          for review.
+        - Imaging, Work and School Note MMD: click the matching template AND
+          the confirm/auto-populate button, landing you on the populated
+          form ready for review.
+        - HPV & Cytology Cervical Screening (ON): click the matching
+          template, then select the "MMD" preset option in the
+          auto-populate dialog, THEN click the confirm/auto-populate
+          button — one extra required step versus the other auto-populate
+          forms.
       No path signs or submits any order — each only opens/pre-fills a form
       for you to review and complete yourself.
 
  ONE WEAKER SPOT WORTH WATCHING: the shared "auto-populate & continue"
- button (used by imaging, the MMD note, and the cytology/HPV requisition)
+ button (used by imaging, the MMD note, and the HPV/cytology requisition)
  is a plain <input type="submit"> with a fairly generic class ("save
  primary") and, unlike the other buttons in this script, it has no visible
  text for the script to double-check against (submit inputs show their
@@ -89,6 +93,13 @@
      pulses briefly so you know something happened, especially useful for
      catching a ⚠️ stop. Alt+5..8 hotkeys work identically whether the
      panel is minimized, expanded, or mid-drag.
+
+ CHANGED (0.6.0): correction — the Alt+8 form was wired to the wrong
+ template ("Alpha Labs Cytology & HPV Requisition"). It's now pointed at
+ the correct one, "HPV & Cytology Cervical Screening - Ontario Health
+ (ON)". Its auto-populate dialog also requires selecting an "MMD" preset
+ option before Apply, which the script now does automatically as part of
+ this pick — that step doesn't apply to imaging or the school note.
 =====================================================================================
 */
 
@@ -176,20 +187,34 @@
         ),
     },
     cytologyResult: {
-      label: 'Alpha Labs Cytology & HPV Requisition template result',
+      label: 'HPV & Cytology Cervical Screening template result',
       find: () =>
         uniqueAmongOrThrow(
           Array.from(document.querySelectorAll('div.item-title.truncate.item-title-custom')).filter(
-            (el) => el.textContent && el.textContent.trim() === 'Alpha Labs Cytology & HPV Requisition'
+            (el) => el.textContent && el.textContent.trim() === 'HPV & Cytology Cervical Screening - Ontario Health (ON)'
           ),
-          'Alpha Labs Cytology & HPV Requisition template result'
+          'HPV & Cytology Cervical Screening template result'
+        ),
+    },
+    cytologyPresetMMD: {
+      label: '"MMD" preset option (in the cytology/HPV auto-populate dialog)',
+      // This is a plain option row inside the auto-populate dialog (not the
+      // main template-picker list), so it only carries "item-title truncate"
+      // — no "-custom" suffix. Matched on exact text, same safety rule as
+      // everything else here.
+      find: () =>
+        uniqueAmongOrThrow(
+          Array.from(document.querySelectorAll('div.item-title.truncate')).filter(
+            (el) => el.textContent && el.textContent.trim() === 'MMD'
+          ),
+          '"MMD" preset option'
         ),
     },
     // Shared by any form whose "auto-populate & continue" dialog uses this
-    // generic submit button (currently imaging and cytology). Deliberately
-    // matches only on the stable classes — "hover"/"active" seen in some
-    // captures of this button are transient click-state classes, not part
-    // of its identity, so they're left out on purpose.
+    // generic submit button (currently imaging, MMD note, and cytology).
+    // Deliberately matches only on the stable classes — "hover"/"active"
+    // seen in some captures of this button are transient click-state
+    // classes, not part of its identity, so they're left out on purpose.
     autoPopulateConfirm: {
       label: 'Auto-populate / continue button',
       // No text to verify against (submit inputs show their label via a
@@ -316,10 +341,11 @@
     },
     {
       id: 'cytology',
-      label: '🧫 Alt+8 — Alpha Labs Cytology & HPV Req',
+      label: '🧫 Alt+8 — HPV & Cytology Cervical Screening (ON)',
       hotkey: '8',
       searchText: 'hpv',
-      autoSelectResult: SELECTORS.cytologyResult, // proceeds automatically
+      autoSelectResult: SELECTORS.cytologyResult,
+      autoPreset: SELECTORS.cytologyPresetMMD, // selects "MMD" in the auto-populate dialog, before Apply
       autoConfirm: SELECTORS.autoPopulateConfirm,
     },
   ];
@@ -334,6 +360,9 @@
         return;
       }
       await clickWhenReady(pick.autoSelectResult);
+      if (pick.autoPreset) {
+        await clickWhenReady(pick.autoPreset);
+      }
       if (pick.autoConfirm) {
         await clickWhenReady(pick.autoConfirm);
         setStatus(`✅ "${pick.label}" opened and populated — review before you continue.`, false);
