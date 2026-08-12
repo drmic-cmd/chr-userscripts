@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Quick Pick (Forms)
 // @namespace    matt-family-med-stratford
-// @version      0.4.0
+// @version      0.4.1
 // @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, cytology & HPV requisition, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -34,24 +34,24 @@
    2. Clicks "All Templates".
    3. Types the form's search text into the template search box.
    4. Then, per form:
-        - Bloodwork, Work and School Note MMD: click the matching template
-          to open it, then STOP — you review and click Apply/Continue
-          yourself.
-        - Imaging, Alpha Labs Cytology & HPV Requisition: click the matching
-          template AND the confirm/auto-populate button, landing you on the
-          populated form ready for review.
+        - Bloodwork: clicks the matching template to open it, then STOPS —
+          you review and click Apply/Continue yourself.
+        - Imaging, Work and School Note MMD, Alpha Labs Cytology & HPV
+          Requisition: click the matching template AND the confirm/
+          auto-populate button, landing you on the populated form ready
+          for review.
       No path signs or submits any order — each only opens/pre-fills a form
       for you to review and complete yourself.
 
  ONE WEAKER SPOT WORTH WATCHING: the shared "auto-populate & continue"
- button (used by imaging and by the cytology/HPV requisition) is a plain
- <input type="submit"> with a fairly generic class ("save primary") and,
- unlike the other buttons in this script, it has no visible text for the
- script to double-check against (submit inputs show their label via a
- "value" attribute, which wasn't captured). It's still protected by the
- same "only click if there's exactly one visible match" rule, but pay extra
- attention to this specific step the first several times you test either of
- those two forms.
+ button (used by imaging, the MMD note, and the cytology/HPV requisition)
+ is a plain <input type="submit"> with a fairly generic class ("save
+ primary") and, unlike the other buttons in this script, it has no visible
+ text for the script to double-check against (submit inputs show their
+ label via a "value" attribute, which wasn't captured). It's still
+ protected by the same "only click if there's exactly one visible match"
+ rule, but pay extra attention to this specific step the first several
+ times you test any of those three forms.
 
  TEST IN YOUR TRAINING ENVIRONMENT FIRST, with the console open (F12),
  before relying on this during a real patient day. Adding another form later
@@ -71,6 +71,10 @@
  Requisition (Alt+8, auto-populates). The imaging and cytology forms now
  share one selector for the auto-populate confirm button, since both use
  the same generic submit button.
+
+ CHANGED (0.4.1): correction — the MMD note also has an auto-populate step
+ (same shared Apply button), not just template-open-and-stop as first
+ wired. It now auto-confirms too, same as imaging and cytology.
 =====================================================================================
 */
 
@@ -293,8 +297,8 @@
       label: '📝 Alt+7 — Work and School Note MMD',
       hotkey: '7',
       searchText: 'mmd',
-      autoSelectResult: SELECTORS.mmdResult, // clicks the template for you...
-      autoConfirm: null, // ...but stops there — you review and click Apply/Continue yourself
+      autoSelectResult: SELECTORS.mmdResult, // proceeds automatically
+      autoConfirm: SELECTORS.autoPopulateConfirm,
     },
     {
       id: 'cytology',
