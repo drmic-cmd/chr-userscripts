@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         CHR Quick Pick (Forms)
 // @namespace    matt-family-med-stratford
-// @version      0.3.0
-// @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
+// @version      0.4.0
+// @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, cytology & HPV requisition, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
 // @match        https://*.chr.md/*
@@ -34,27 +34,30 @@
    2. Clicks "All Templates".
    3. Types the form's search text into the template search box.
    4. Then, per form:
-        - Bloodwork: clicks the matching template ("Lab - MOHLTC (ON)") to
-          open it, then STOPS — you review and click Apply/Continue yourself.
-        - Imaging: clicks the matching template AND the confirm/auto-populate
-          button, landing you on the populated form ready for review.
-      Neither path signs or submits any order — both only open/pre-fill a
-      form for you to review and complete yourself.
+        - Bloodwork, Work and School Note MMD: click the matching template
+          to open it, then STOP — you review and click Apply/Continue
+          yourself.
+        - Imaging, Alpha Labs Cytology & HPV Requisition: click the matching
+          template AND the confirm/auto-populate button, landing you on the
+          populated form ready for review.
+      No path signs or submits any order — each only opens/pre-fills a form
+      for you to review and complete yourself.
 
- ONE WEAKER SPOT WORTH WATCHING: the imaging "auto-populate & continue"
- button is a plain <input type="submit"> with a fairly generic class
- ("save primary") and, unlike the other buttons in this script, it has no
- visible text for the script to double-check against (submit inputs show
- their label via a "value" attribute, which wasn't captured). It's still
- protected by the same "only click if there's exactly one visible match"
- rule, but pay extra attention to this specific step the first several
- times you test it.
+ ONE WEAKER SPOT WORTH WATCHING: the shared "auto-populate & continue"
+ button (used by imaging and by the cytology/HPV requisition) is a plain
+ <input type="submit"> with a fairly generic class ("save primary") and,
+ unlike the other buttons in this script, it has no visible text for the
+ script to double-check against (submit inputs show their label via a
+ "value" attribute, which wasn't captured). It's still protected by the
+ same "only click if there's exactly one visible match" rule, but pay extra
+ attention to this specific step the first several times you test either of
+ those two forms.
 
  TEST IN YOUR TRAINING ENVIRONMENT FIRST, with the console open (F12),
  before relying on this during a real patient day. Adding another form later
  is just adding an entry to QUICK_PICKS near the bottom — send me a fresh
  capture the same way as before and I'll wire it in, and it'll get the next
- free Alt+N hotkey automatically.
+ free Alt+N hotkey automatically (Alt+9 is next).
 
  CHANGED (0.3.0): each quick pick now also has an Alt+N hotkey (Alt+5 for
  bloodwork, Alt+6 for imaging — picking up after the Rx Renewal Assistant's
@@ -62,6 +65,12 @@
  through the panel. The panel itself is also now small and translucent by
  default, expanding on hover or while a pick is running, so it doesn't sit
  on top of the chart underneath it.
+
+ CHANGED (0.4.0): added two more forms — Work and School Note MMD (Alt+7,
+ stops after opening, no auto-populate) and Alpha Labs Cytology & HPV
+ Requisition (Alt+8, auto-populates). The imaging and cytology forms now
+ share one selector for the auto-populate confirm button, since both use
+ the same generic submit button.
 =====================================================================================
 */
 
@@ -138,8 +147,33 @@
           'Imaging template result'
         ),
     },
-    imagingConfirm: {
-      label: 'Auto-populate / continue button (imaging)',
+    mmdResult: {
+      label: 'Work and School Note MMD template result',
+      find: () =>
+        uniqueAmongOrThrow(
+          Array.from(document.querySelectorAll('div.item-title.truncate.item-title-custom')).filter(
+            (el) => el.textContent && el.textContent.trim() === 'Work and School Note MMD'
+          ),
+          'Work and School Note MMD template result'
+        ),
+    },
+    cytologyResult: {
+      label: 'Alpha Labs Cytology & HPV Requisition template result',
+      find: () =>
+        uniqueAmongOrThrow(
+          Array.from(document.querySelectorAll('div.item-title.truncate.item-title-custom')).filter(
+            (el) => el.textContent && el.textContent.trim() === 'Alpha Labs Cytology & HPV Requisition'
+          ),
+          'Alpha Labs Cytology & HPV Requisition template result'
+        ),
+    },
+    // Shared by any form whose "auto-populate & continue" dialog uses this
+    // generic submit button (currently imaging and cytology). Deliberately
+    // matches only on the stable classes — "hover"/"active" seen in some
+    // captures of this button are transient click-state classes, not part
+    // of its identity, so they're left out on purpose.
+    autoPopulateConfirm: {
+      label: 'Auto-populate / continue button',
       // No text to verify against (submit inputs show their label via a
       // "value" attribute, not captured) — relies solely on the
       // exactly-one-visible-match rule. See the header note above.
@@ -252,7 +286,23 @@
       hotkey: '6',
       searchText: 'imaging - xray/us/bmd',
       autoSelectResult: SELECTORS.imagingResult, // proceeds automatically
-      autoConfirm: SELECTORS.imagingConfirm,
+      autoConfirm: SELECTORS.autoPopulateConfirm,
+    },
+    {
+      id: 'mmd',
+      label: '📝 Alt+7 — Work and School Note MMD',
+      hotkey: '7',
+      searchText: 'mmd',
+      autoSelectResult: SELECTORS.mmdResult, // clicks the template for you...
+      autoConfirm: null, // ...but stops there — you review and click Apply/Continue yourself
+    },
+    {
+      id: 'cytology',
+      label: '🧫 Alt+8 — Alpha Labs Cytology & HPV Req',
+      hotkey: '8',
+      searchText: 'hpv',
+      autoSelectResult: SELECTORS.cytologyResult, // proceeds automatically
+      autoConfirm: SELECTORS.autoPopulateConfirm,
     },
   ];
 
