@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Quick Pick (Forms)
 // @namespace    matt-family-med-stratford
-// @version      0.4.1
+// @version      0.5.0
 // @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, cytology & HPV requisition, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -75,6 +75,20 @@
  CHANGED (0.4.1): correction — the MMD note also has an auto-populate step
  (same shared Apply button), not just template-open-and-stop as first
  wired. It now auto-confirms too, same as imaging and cytology.
+
+ CHANGED (0.5.0): the panel is now draggable and minimizable, since a
+ 4-form list was starting to cover buttons underneath it.
+   - Drag anywhere by its "⠿ Quick Pick: Forms" title bar.
+   - Click the "–" button (top-right of the panel) to shrink it down to a
+     small circle; click that circle again to restore it.
+   - Both the position and minimized/expanded state are remembered (via
+     localStorage) so it stays put across page reloads and new patients —
+     it does NOT reset itself.
+   - While minimized, the panel won't auto-pop-open when a pick runs (that
+     would defeat the point of minimizing it) — instead the restore circle
+     pulses briefly so you know something happened, especially useful for
+     catching a ⚠️ stop. Alt+5..8 hotkeys work identically whether the
+     panel is minimized, expanded, or mid-drag.
 =====================================================================================
 */
 
@@ -359,14 +373,27 @@
         width: 300px;
         padding: 12px;
       }
-      #chrqp-panel h4 { margin: 0 0 8px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      #chrqp-panel button {
+      #chrqp-header {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 8px; gap: 6px;
+      }
+      #chrqp-drag-handle {
+        cursor: move; font-weight: 600; font-size: 13px; user-select: none;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
+      }
+      #chrqp-min-btn {
+        flex-shrink: 0; width: 20px; height: 20px; padding: 0; margin: 0;
+        border: 1px solid #cbd5e0; border-radius: 4px; background: #f7fafc;
+        cursor: pointer; font-size: 13px; line-height: 1; color: #4a5568;
+      }
+      #chrqp-min-btn:hover { background: #e2e8f0; }
+      #chrqp-panel button.chrqp-pick {
         display: block; width: 100%; margin-bottom: 6px; padding: 7px 8px;
         background: #f0fff4; border: 1px solid #9ae6b4; border-radius: 4px;
         cursor: pointer; font-size: 12px; text-align: left;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
-      #chrqp-panel button:hover { background: #c6f6d5; }
+      #chrqp-panel button.chrqp-pick:hover { background: #c6f6d5; }
       #chrqp-status {
         margin-top: 8px; padding: 6px 8px; border-radius: 4px;
         background: #f7fafc; border: 1px solid #e2e8f0; min-height: 32px;
@@ -374,6 +401,33 @@
       }
       #chrqp-status.warn { background: #fffbea; border-color: #f6e05e; color: #744210; }
       #chrqp-status.err { background: #fff5f5; border-color: #feb2b2; color: #822727; }
+
+      /* Minimized: collapses to a small draggable circle showing just the
+         restore button, anchored at whatever position it was left at. */
+      #chrqp-panel.chrqp-minimized {
+        width: 40px !important; padding: 0 !important; opacity: 0.55;
+        border-radius: 999px; overflow: hidden;
+      }
+      #chrqp-panel.chrqp-minimized:hover,
+      #chrqp-panel.chrqp-minimized:focus-within {
+        width: 40px !important; opacity: 1;
+      }
+      #chrqp-panel.chrqp-minimized #chrqp-drag-handle,
+      #chrqp-panel.chrqp-minimized #chrqp-body {
+        display: none;
+      }
+      #chrqp-panel.chrqp-minimized #chrqp-header {
+        margin: 0; justify-content: center; padding: 8px 0;
+      }
+      #chrqp-panel.chrqp-minimized #chrqp-min-btn {
+        width: 24px; height: 24px; border-radius: 999px; font-size: 15px;
+      }
+      @keyframes chrqp-pulse-anim {
+        0% { box-shadow: 0 0 0 0 rgba(72,187,120,0.55); }
+        70% { box-shadow: 0 0 0 9px rgba(72,187,120,0); }
+        100% { box-shadow: 0 0 0 0 rgba(72,187,120,0); }
+      }
+      #chrqp-min-btn.chrqp-pulse { animation: chrqp-pulse-anim 0.8s ease-out 2; }
     `;
     document.head.appendChild(style);
   }
@@ -383,7 +437,7 @@
 
   function expandPanel() {
     const panel = document.getElementById('chrqp-panel');
-    if (!panel) return;
+    if (!panel || panel.classList.contains('chrqp-minimized')) return;
     panel.classList.add('chrqp-active');
     if (chrqpCollapseTimer) clearTimeout(chrqpCollapseTimer);
   }
@@ -397,6 +451,14 @@
     }, delayMs);
   }
 
+  function pulseMinButton() {
+    const btn = document.getElementById('chrqp-min-btn');
+    if (!btn) return;
+    btn.classList.remove('chrqp-pulse');
+    void btn.offsetWidth; // restart the animation if it's already mid-pulse
+    btn.classList.add('chrqp-pulse');
+  }
+
   function setStatus(msg, isWarnOrError) {
     const el = document.getElementById('chrqp-status');
     if (!el) return;
@@ -404,29 +466,150 @@
     el.classList.remove('warn', 'err');
     if (isWarnOrError) el.classList.add(msg.startsWith('⚠️') ? 'err' : 'warn');
     console.log('[CHR Quick Pick]', msg);
+    const panel = document.getElementById('chrqp-panel');
+    if (panel && panel.classList.contains('chrqp-minimized')) {
+      // Respect that the user minimized it on purpose — don't pop it back
+      // open on its own, just pulse the restore button so they notice.
+      pulseMinButton();
+      return;
+    }
     expandPanel();
     const isTerminal = msg.startsWith('✅') || msg.startsWith('⚠️');
     scheduleCollapse(isTerminal ? 4000 : 8000);
   }
 
+  // Position and minimized state persist across page loads (this script
+  // runs directly in the page, so plain localStorage is fine — same
+  // mechanism the page itself could use, just under its own key).
+  const POS_KEY = 'chrqp-panel-pos';
+  const MIN_KEY = 'chrqp-panel-minimized';
+
+  function loadSavedPosition(panel) {
+    try {
+      const raw = localStorage.getItem(POS_KEY);
+      if (!raw) return;
+      const { left, top } = JSON.parse(raw);
+      if (typeof left === 'number' && typeof top === 'number') {
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+      }
+    } catch (e) {
+      /* corrupt or blocked storage — just keep the default position */
+    }
+  }
+
+  function savePosition(panel) {
+    try {
+      const rect = panel.getBoundingClientRect();
+      localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top }));
+    } catch (e) {
+      /* storage blocked — dragging still works, just won't persist */
+    }
+  }
+
+  function loadMinimizedState(panel, minBtn) {
+    try {
+      if (localStorage.getItem(MIN_KEY) === '1') {
+        panel.classList.add('chrqp-minimized');
+        minBtn.textContent = '▢';
+        minBtn.title = 'Restore';
+      }
+    } catch (e) {
+      /* ignore — starts expanded */
+    }
+  }
+
+  function saveMinimizedState(panel) {
+    try {
+      localStorage.setItem(MIN_KEY, panel.classList.contains('chrqp-minimized') ? '1' : '0');
+    } catch (e) {
+      /* storage blocked — toggle still works, just won't persist */
+    }
+  }
+
+  // Clamp so a drag (or a saved position from a since-resized window) can
+  // never leave the panel stuck off-screen.
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function makeDraggable(panel, handle) {
+    let dragging = false;
+    let startX = 0;
+    let startY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+
+    handle.addEventListener('mousedown', (e) => {
+      dragging = true;
+      const rect = panel.getBoundingClientRect();
+      startX = e.clientX;
+      startY = e.clientY;
+      startLeft = rect.left;
+      startTop = rect.top;
+      panel.classList.add('chrqp-active'); // stay fully visible while dragging
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      const maxLeft = window.innerWidth - panel.offsetWidth - 4;
+      const maxTop = window.innerHeight - panel.offsetHeight - 4;
+      panel.style.left = `${clamp(startLeft + dx, 4, Math.max(4, maxLeft))}px`;
+      panel.style.top = `${clamp(startTop + dy, 4, Math.max(4, maxTop))}px`;
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      savePosition(panel);
+      scheduleCollapse(600);
+    });
+  }
+
   function buildPanel() {
     const panel = document.createElement('div');
     panel.id = 'chrqp-panel';
-    const buttonsHtml = QUICK_PICKS.map((p, i) => `<button data-idx="${i}">${p.label}</button>`).join('');
+    const buttonsHtml = QUICK_PICKS.map((p, i) => `<button class="chrqp-pick" data-idx="${i}">${p.label}</button>`).join('');
     panel.innerHTML = `
-      <h4>Quick Pick: Forms</h4>
-      ${buttonsHtml}
-      <div id="chrqp-status">Ready. Open a patient's chart, then pick a form.</div>
+      <div id="chrqp-header">
+        <span id="chrqp-drag-handle">⠿ Quick Pick: Forms</span>
+        <button id="chrqp-min-btn" title="Minimize">–</button>
+      </div>
+      <div id="chrqp-body">
+        ${buttonsHtml}
+        <div id="chrqp-status">Ready. Open a patient's chart, then pick a form.</div>
+      </div>
     `;
     document.body.appendChild(panel);
-    panel.querySelectorAll('button[data-idx]').forEach((btn) => {
+
+    panel.querySelectorAll('button.chrqp-pick').forEach((btn) => {
       btn.addEventListener('click', () => runQuickPick(QUICK_PICKS[Number(btn.dataset.idx)]));
     });
+
     panel.addEventListener('mouseenter', () => { chrqpHovered = true; });
     panel.addEventListener('mouseleave', () => {
       chrqpHovered = false;
       scheduleCollapse(600);
     });
+
+    const minBtn = panel.querySelector('#chrqp-min-btn');
+    minBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const nowMinimized = panel.classList.toggle('chrqp-minimized');
+      panel.classList.remove('chrqp-active');
+      minBtn.classList.remove('chrqp-pulse');
+      minBtn.textContent = nowMinimized ? '▢' : '–';
+      minBtn.title = nowMinimized ? 'Restore' : 'Minimize';
+      saveMinimizedState(panel);
+    });
+
+    loadSavedPosition(panel);
+    loadMinimizedState(panel, minBtn);
+    makeDraggable(panel, panel.querySelector('#chrqp-drag-handle'));
+
     return panel;
   }
 
