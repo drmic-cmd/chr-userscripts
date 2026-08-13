@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Quick Pick (Forms)
 // @namespace    matt-family-med-stratford
-// @version      0.7.2
+// @version      0.9.1
 // @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, HPV & cytology cervical screening, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -41,9 +41,9 @@
           pre-selects "HPHA XR" as the recipient (so the later fax step is
           already populated with the correct number instead of needing a
           manual search), then clicks Apply.
-        - Work and School Note MMD: click the matching template AND the
-          confirm/auto-populate button, landing you on the populated form
-          ready for review.
+        - Work and School Note MMD, Mailed Colorectal Cancer Screening
+          (FIT): click the matching template AND the confirm/auto-populate
+          button, landing you on the populated form ready for review.
         - HPV & Cytology Cervical Screening (ON): click the matching
           template, then select the "MMD" preset option in the
           auto-populate dialog, THEN click the confirm/auto-populate
@@ -54,23 +54,25 @@
       it yourself.
 
  ONE WEAKER SPOT WORTH WATCHING: the shared "auto-populate & continue"
- button (used by imaging, the MMD note, and the HPV/cytology requisition)
- is a plain <input type="submit"> with a fairly generic class ("save
- primary") and, unlike the other buttons in this script, it has no visible
- text for the script to double-check against (submit inputs show their
- label via a "value" attribute, which wasn't captured). It's still
- protected by the same "only click if there's exactly one visible match"
- rule, but pay extra attention to this specific step the first several
- times you test any of those three forms. The imaging recipient search
- (typing "xr" and picking "HPHA XR") has the same protection as everything
- else here, but is worth double-checking the first several runs too, since
- it's new and involves typing into a second search box mid-flow.
+ button (used by imaging, the MMD note, the HPV/cytology requisition, and
+ the FIT test) is a plain <input type="submit"> with a fairly generic
+ class ("save primary") and, unlike the other buttons in this script, it
+ has no visible text for the script to double-check against (submit
+ inputs show their label via a "value" attribute, which wasn't captured).
+ It's still protected by the same "only click if there's exactly one
+ visible match" rule, but pay extra attention to this specific step the
+ first several times you test any of those four forms. The imaging
+ recipient search (typing "xr" and picking "HPHA XR") has the same
+ protection as everything else here, but is worth double-checking the
+ first several runs too, since it's new and involves typing into a second
+ search box mid-flow.
 
  TEST IN YOUR TRAINING ENVIRONMENT FIRST, with the console open (F12),
  before relying on this during a real patient day. Adding another form later
  is just adding an entry to QUICK_PICKS near the bottom — send me a fresh
- capture the same way as before and I'll wire it in, and it'll get the next
- free Alt+N hotkey automatically (Alt+9 is next).
+ capture the same way as before and I'll wire it in. Alt+3 is already
+ reserved for the second X-ray requisition; after that, Alt+7, 8, 9, 0 are
+ free.
 
  CHANGED (0.3.0): each quick pick now also has an Alt+N hotkey (Alt+5 for
  bloodwork, Alt+6 for imaging — picking up after the Rx Renewal Assistant's
@@ -131,6 +133,34 @@
  character with real keydown/keypress/keyup events, the same as typing by
  hand — this only affects the fax-recipient search; the template search
  box (which was already working) is unchanged.
+
+ CHANGED (0.8.0): renumbered hotkeys to Alt+1 through Alt+0, dedicated
+ entirely to this script (Quick Pick), freeing up the whole 1-0 range as
+ the list of forms grows:
+   Alt+1 Bloodwork · Alt+2 Imaging (HPHA X-ray) · Alt+3 reserved for a
+   second X-ray requisition, coming soon · Alt+4 Work and School Note MMD
+   · Alt+5 HPV & Cytology Cervical Screening (PAP)
+
+ ⚠️ IMPORTANT INTERIM NOTE: the Rx Renewal Assistant script still uses
+ Alt+1 through Alt+4 for its own steps (unchanged, on purpose — its
+ hotkeys are being redesigned separately). Until that happens, if BOTH
+ scripts are loaded on the same page, pressing Alt+1 through Alt+4 will
+ trigger a step in EACH script simultaneously — e.g. Alt+1 would fire
+ "Bloodwork" here AND "open chart → renew list" in Rx Renewal Assistant
+ at the same time. Only Alt+5 and up are collision-free for now. Be
+ deliberate about testing this before using Alt+1..4 for real patient work
+ with both scripts active — this gets resolved once the Rx script's
+ hotkeys move.
+
+ CHANGED (0.9.0): added Alt+6 — Mailed Colorectal Cancer Screening (FIT).
+ Search text "mailed", opens the template and stops there for you to
+ review/Apply yourself (no auto-populate dialog has been captured for this
+ one yet — if it turns out to have one, send a capture and it'll pick up
+ the same auto-populate handling as the other forms).
+
+ CHANGED (0.9.1): correction — the FIT test does have an auto-populate
+ dialog after all. Alt+6 now clicks the shared Apply button too, same as
+ imaging/MMD/cytology, instead of stopping at the open template.
 =====================================================================================
 */
 
@@ -195,6 +225,19 @@
             (el) => el.textContent && el.textContent.trim() === 'Lab - MOHLTC (ON)'
           ),
           'Bloodwork template result'
+        ),
+    },
+    fitResult: {
+      label: 'Mailed Colorectal Cancer Screening (FIT) template result',
+      // Exact text captured as-is, including the trailing "Healt" — that
+      // appears to be how the template is actually named/truncated in CHR
+      // itself, not a display artifact, so it's matched verbatim.
+      find: () =>
+        uniqueAmongOrThrow(
+          Array.from(document.querySelectorAll('div.item-title.truncate.item-title-custom')).filter(
+            (el) => el.textContent && el.textContent.trim() === 'Mailed Colorectal Cancer Screening (FIT) - ICL/Ontario Healt'
+          ),
+          'Mailed Colorectal Cancer Screening (FIT) template result'
         ),
     },
     imagingResult: {
@@ -435,21 +478,26 @@
 
 
   // ===================================================================
-  // Quick picks — add more forms here later, same shape each time
+  // Quick picks — add more forms here later, same shape each time.
+  //
+  // Numbering scheme (0.8.0): Alt+1 through Alt+0, dedicated to this
+  // script only. Alt+3 is deliberately left unassigned — reserved for a
+  // second X-ray requisition to be added later, so it doesn't need to
+  // renumber everything after it once that's captured.
   // ===================================================================
   const QUICK_PICKS = [
     {
       id: 'bloodwork',
-      label: '🩸 Alt+5 — Bloodwork Requisition (Lab - MOHLTC)',
-      hotkey: '5',
+      label: '🩸 Alt+1 — Bloodwork Requisition (Lab - MOHLTC)',
+      hotkey: '1',
       searchText: 'Lab - MOH',
       autoSelectResult: SELECTORS.bloodworkResult, // clicks the template for you...
       autoConfirm: null, // ...but stops there — you review and click Apply/Continue yourself
     },
     {
       id: 'imaging',
-      label: '🩻 Alt+6 — Imaging - Xray/US/BMD (SGH/HPHA)',
-      hotkey: '6',
+      label: '🩻 Alt+2 — Imaging - Xray/US/BMD (SGH/HPHA)',
+      hotkey: '2',
       searchText: 'imaging - xray/us/bmd',
       autoSelectResult: SELECTORS.imagingResult, // proceeds automatically
       autoRecipient: {
@@ -463,21 +511,31 @@
       },
       autoConfirm: SELECTORS.autoPopulateConfirm,
     },
+    // Alt+3 reserved — a second X-ray requisition is coming; send its
+    // capture whenever it's ready and it'll slot in right here as hotkey '3'.
     {
       id: 'mmd',
-      label: '📝 Alt+7 — Work and School Note MMD',
-      hotkey: '7',
+      label: '📝 Alt+4 — Work and School Note MMD',
+      hotkey: '4',
       searchText: 'mmd',
       autoSelectResult: SELECTORS.mmdResult, // proceeds automatically
       autoConfirm: SELECTORS.autoPopulateConfirm,
     },
     {
       id: 'cytology',
-      label: '🧫 Alt+8 — HPV & Cytology Cervical Screening (ON)',
-      hotkey: '8',
+      label: '🧫 Alt+5 — HPV & Cytology Cervical Screening (PAP)',
+      hotkey: '5',
       searchText: 'hpv',
       autoSelectResult: SELECTORS.cytologyResult,
       autoPreset: SELECTORS.cytologyPresetMMD, // selects "MMD" in the auto-populate dialog, before Apply
+      autoConfirm: SELECTORS.autoPopulateConfirm,
+    },
+    {
+      id: 'fit',
+      label: '🧪 Alt+6 — Mailed Colorectal Cancer Screening (FIT)',
+      hotkey: '6',
+      searchText: 'mailed',
+      autoSelectResult: SELECTORS.fitResult, // proceeds automatically
       autoConfirm: SELECTORS.autoPopulateConfirm,
     },
   ];
