@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Quick Pick (Forms)
 // @namespace    matt-family-med-stratford
-// @version      0.9.1
+// @version      0.9.2
 // @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, HPV & cytology cervical screening, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -161,6 +161,18 @@
  CHANGED (0.9.1): correction — the FIT test does have an auto-populate
  dialog after all. Alt+6 now clicks the shared Apply button too, same as
  imaging/MMD/cytology, instead of stopping at the open template.
+
+ CHANGED (0.9.2): fix — the FIT test's search ("mailed") wasn't returning
+ results, same symptom as the earlier fax-recipient bug (text visible in
+ the box, empty results). Root cause: the main template search apparently
+ behaves inconsistently between folders — some filter client-side off any
+ instant value-set (why bloodwork/imaging/MMD/PAP "just worked"), but at
+ least this one only triggers its lookup off real keystroke events. Rather
+ than patch it form-by-form as this keeps surfacing, ALL template searches
+ now type character-by-character with real keydown/keypress/keyup events,
+ the same fix already used for the fax-recipient box. Also renamed the
+ panel labels: Alt+5 is now "PAP req", Alt+6 is now "FIT - colorectal
+ cancer req" (cosmetic only, no behavior change).
 =====================================================================================
 */
 
@@ -396,16 +408,6 @@
     return el;
   }
 
-  // Sets an input's value in a way that Vue/React-style reactive bindings
-  // actually notice (a plain `.value = x` assignment is often silently
-  // ignored by frameworks that override the native setter).
-  function setReactiveInputValue(inputEl, value) {
-    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    nativeSetter.call(inputEl, value);
-    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-
   // Some CHR search boxes only trigger their AJAX lookup off real keystroke
   // events (keydown/keyup), not off a single instant value-set — so this
   // types one character at a time with proper keyboard events in between,
@@ -449,8 +451,14 @@
     await clickWhenReady(SELECTORS.allTemplatesButton);
     const searchEl = await waitFor(SELECTORS.searchInput.find);
     setStatus(`Typing search: "${searchText}" …`);
-    setReactiveInputValue(searchEl, searchText);
-    await new Promise((r) => setTimeout(r, 600)); // let the live filter settle
+    // Some folders' template search only filters client-side off any
+    // value-set (which is why this worked fine for most forms so far), but
+    // at least one folder's search only triggers its lookup off real
+    // keystroke events — same issue as the fax-recipient box. Typing like a
+    // real keyboard here works either way, so it's used everywhere now
+    // rather than only where it was known to be necessary.
+    await typeLikeAKeyboard(searchEl, searchText);
+    await new Promise((r) => setTimeout(r, 900)); // let the filter/AJAX lookup settle
   }
 
   // ===================================================================
@@ -523,7 +531,7 @@
     },
     {
       id: 'cytology',
-      label: '🧫 Alt+5 — HPV & Cytology Cervical Screening (PAP)',
+      label: '🧫 Alt+5 — PAP req',
       hotkey: '5',
       searchText: 'hpv',
       autoSelectResult: SELECTORS.cytologyResult,
@@ -532,7 +540,7 @@
     },
     {
       id: 'fit',
-      label: '🧪 Alt+6 — Mailed Colorectal Cancer Screening (FIT)',
+      label: '🧪 Alt+6 — FIT - colorectal cancer req',
       hotkey: '6',
       searchText: 'mailed',
       autoSelectResult: SELECTORS.fitResult, // proceeds automatically
