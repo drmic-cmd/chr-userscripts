@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Quick Pick (Forms)
 // @namespace    matt-family-med-stratford
-// @version      0.9.2
+// @version      0.9.4
 // @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, HPV & cytology cervical screening, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -173,6 +173,25 @@
  the same fix already used for the fax-recipient box. Also renamed the
  panel labels: Alt+5 is now "PAP req", Alt+6 is now "FIT - colorectal
  cancer req" (cosmetic only, no behavior change).
+
+ CHANGED (0.9.3): typing into search boxes is now much faster. All but the
+ last character of the search text is set instantly; only the last
+ character gets a real keystroke (keydown/keypress/keyup). CHR's search
+ debounce reads the box's current value whenever it sees a keyup, not
+ which key was pressed, so one genuine keystroke against the already-
+ complete text is enough to trigger it — no need to simulate typing the
+ whole word out letter by letter. Applies to both the template search and
+ the fax-recipient search.
+
+ CHANGED (0.9.4): fix — Alt+6 was timing out ("timed out waiting") after
+ the search populated correctly, because the FIT template's result was
+ matched on the exact full captured text (ending oddly at "...Ontario
+ Healt"), which apparently doesn't match the live DOM text byte-for-byte.
+ Switched to matching on a stable leading substring ("Mailed Colorectal
+ Cancer Screening (FIT)") instead — still requires exactly one visible
+ match, so this doesn't weaken the safety check, it just stops depending
+ on getting every trailing character of a truncated-looking string exactly
+ right.
 =====================================================================================
 */
 
@@ -241,13 +260,18 @@
     },
     fitResult: {
       label: 'Mailed Colorectal Cancer Screening (FIT) template result',
-      // Exact text captured as-is, including the trailing "Healt" — that
-      // appears to be how the template is actually named/truncated in CHR
-      // itself, not a display artifact, so it's matched verbatim.
+      // Matched on a stable leading substring rather than the full captured
+      // text — the captured text ended oddly at "...Ontario Healt", which
+      // strongly suggests the live DOM text doesn't render byte-for-byte
+      // identical to what was captured (a different truncation point,
+      // trailing whitespace, etc.), so a strict full-text match was never
+      // finding anything and just timing out. This still enforces "exactly
+      // one visible match," so a lookalike template would correctly stop
+      // the script with a warning rather than risk a wrong click.
       find: () =>
         uniqueAmongOrThrow(
           Array.from(document.querySelectorAll('div.item-title.truncate.item-title-custom')).filter(
-            (el) => el.textContent && el.textContent.trim() === 'Mailed Colorectal Cancer Screening (FIT) - ICL/Ontario Healt'
+            (el) => el.textContent && el.textContent.trim().startsWith('Mailed Colorectal Cancer Screening (FIT)')
           ),
           'Mailed Colorectal Cancer Screening (FIT) template result'
         ),
@@ -408,26 +432,37 @@
     return el;
   }
 
-  // Some CHR search boxes only trigger their AJAX lookup off real keystroke
-  // events (keydown/keyup), not off a single instant value-set — so this
-  // types one character at a time with proper keyboard events in between,
-  // the same way typing by hand would. Slower, but it's what those boxes
-  // actually need to see.
-  async function typeLikeAKeyboard(inputEl, text, perCharDelayMs = 130) {
+  // Sets an input's value in a way that Vue/React-style reactive bindings
+  // actually notice (a plain `.value = x` assignment is often silently
+  // ignored by frameworks that override the native setter).
+  function setReactiveInputValue(inputEl, value) {
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    nativeSetter.call(inputEl, value);
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  // Some CHR search boxes only trigger their AJAX lookup off a real keyup
+  // event — but that lookup reads whatever the box's current value is at
+  // that moment, not which specific key was pressed. So there's no need to
+  // simulate every keystroke: this sets all but the last character
+  // instantly, then fires one real keydown/keypress/keyup for the last
+  // character so the debounce sees a genuine keystroke against the
+  // already-complete text. Much faster than typing the whole thing out.
+  async function typeQuickly(inputEl, text) {
     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
     inputEl.focus();
-    nativeSetter.call(inputEl, '');
-    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-    let current = '';
-    for (const ch of text) {
-      inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
-      inputEl.dispatchEvent(new KeyboardEvent('keypress', { key: ch, bubbles: true }));
-      current += ch;
-      nativeSetter.call(inputEl, current);
-      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-      inputEl.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
-      await new Promise((r) => setTimeout(r, perCharDelayMs));
+    if (text.length === 0) {
+      setReactiveInputValue(inputEl, '');
+      return;
     }
+    const allButLast = text.slice(0, -1);
+    const lastChar = text.slice(-1);
+    setReactiveInputValue(inputEl, allButLast);
+    inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: lastChar, bubbles: true }));
+    inputEl.dispatchEvent(new KeyboardEvent('keypress', { key: lastChar, bubbles: true }));
+    nativeSetter.call(inputEl, text);
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    inputEl.dispatchEvent(new KeyboardEvent('keyup', { key: lastChar, bubbles: true }));
     inputEl.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
@@ -453,11 +488,11 @@
     setStatus(`Typing search: "${searchText}" …`);
     // Some folders' template search only filters client-side off any
     // value-set (which is why this worked fine for most forms so far), but
-    // at least one folder's search only triggers its lookup off real
-    // keystroke events — same issue as the fax-recipient box. Typing like a
-    // real keyboard here works either way, so it's used everywhere now
-    // rather than only where it was known to be necessary.
-    await typeLikeAKeyboard(searchEl, searchText);
+    // at least one folder's search only triggers its lookup off a real
+    // keyup event — same issue as the fax-recipient box. typeQuickly()
+    // handles both cases: it sets the text instantly, then fires one real
+    // keystroke for the last character so a debounce listener sees it too.
+    await typeQuickly(searchEl, searchText);
     await new Promise((r) => setTimeout(r, 900)); // let the filter/AJAX lookup settle
   }
 
@@ -476,10 +511,11 @@
     }
     const searchEl = await waitFor(recipientDef.searchInput.find);
     setStatus(`Typing recipient search: "${recipientDef.searchText}" …`);
-    // This box needs real per-keystroke events to trigger its AJAX lookup
-    // (an instant value-set left it showing the text with no results) — see
-    // the 0.7.2 note in the header.
-    await typeLikeAKeyboard(searchEl, recipientDef.searchText);
+    // This box needs a real keyup event to trigger its AJAX lookup (an
+    // instant value-set left it showing the text with no results) — see
+    // the 0.7.2 note in the header. typeQuickly() sets the text instantly
+    // and fires one real keystroke for the last character to satisfy that.
+    await typeQuickly(searchEl, recipientDef.searchText);
     await new Promise((r) => setTimeout(r, 900)); // let the AJAX lookup return
     await clickWhenReady(recipientDef.result);
   }
