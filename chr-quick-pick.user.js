@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Quick Pick (Forms)
 // @namespace    matt-family-med-stratford
-// @version      0.9.4
+// @version      1.0.0
 // @description  One-click shortcuts to common forms (bloodwork requisition, imaging requisition, work/school note, HPV & cytology cervical screening, ...) from inside a patient chart. Navigation/template-selection only — nothing is signed, submitted, or finalized by this script.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -36,11 +36,13 @@
    4. Then, per form:
         - Bloodwork: clicks the matching template to open it, then STOPS —
           you review and click Apply/Continue yourself.
-        - Imaging: clicks the matching template, opens the fax-recipient
-          search, switches from the default "Contact" tab to "Facility",
-          pre-selects "HPHA XR" as the recipient (so the later fax step is
-          already populated with the correct number instead of needing a
-          manual search), then clicks Apply.
+        - Imaging (HPHA), Imaging - GNMI Stratford: click the matching
+          template, open the fax-recipient search, switch from the default
+          "Contact" tab to "Facility", pre-select the correct recipient
+          (HPHA's is matched by name, GNMI's by its fax number — both work
+          the same way in practice) so the later fax step is already
+          populated with the correct number instead of needing a manual
+          search, then click Apply.
         - Work and School Note MMD, Mailed Colorectal Cancer Screening
           (FIT): click the matching template AND the confirm/auto-populate
           button, landing you on the populated form ready for review.
@@ -54,24 +56,23 @@
       it yourself.
 
  ONE WEAKER SPOT WORTH WATCHING: the shared "auto-populate & continue"
- button (used by imaging, the MMD note, the HPV/cytology requisition, and
- the FIT test) is a plain <input type="submit"> with a fairly generic
- class ("save primary") and, unlike the other buttons in this script, it
- has no visible text for the script to double-check against (submit
- inputs show their label via a "value" attribute, which wasn't captured).
- It's still protected by the same "only click if there's exactly one
- visible match" rule, but pay extra attention to this specific step the
- first several times you test any of those four forms. The imaging
- recipient search (typing "xr" and picking "HPHA XR") has the same
- protection as everything else here, but is worth double-checking the
- first several runs too, since it's new and involves typing into a second
- search box mid-flow.
+ button (used by both imaging forms, the MMD note, the HPV/cytology
+ requisition, and the FIT test) is a plain <input type="submit"> with a
+ fairly generic class ("save primary") and, unlike the other buttons in
+ this script, it has no visible text for the script to double-check
+ against (submit inputs show their label via a "value" attribute, which
+ wasn't captured). It's still protected by the same "only click if there's
+ exactly one visible match" rule, but pay extra attention to this specific
+ step the first several times you test any of those five forms. The
+ recipient search (typing a facility name and picking a result) has the
+ same protection as everything else here, but is worth double-checking on
+ each new form's first several runs too, since it involves typing into a
+ second search box mid-flow.
 
  TEST IN YOUR TRAINING ENVIRONMENT FIRST, with the console open (F12),
  before relying on this during a real patient day. Adding another form later
  is just adding an entry to QUICK_PICKS near the bottom — send me a fresh
- capture the same way as before and I'll wire it in. Alt+3 is already
- reserved for the second X-ray requisition; after that, Alt+7, 8, 9, 0 are
+ capture the same way as before and I'll wire it in. Alt+7, 8, 9, 0 are
  free.
 
  CHANGED (0.3.0): each quick pick now also has an Alt+N hotkey (Alt+5 for
@@ -192,6 +193,17 @@
  match, so this doesn't weaken the safety check, it just stops depending
  on getting every trailing character of a truncated-looking string exactly
  right.
+
+ CHANGED (1.0.0): filled the reserved Alt+3 slot — Imaging - GNMI
+ Stratford (West-ON). Search text "gnmi", pre-selects the correct fax
+ recipient (matched on its fax number, "Fax: +1 519 273 1928", rather than
+ a facility-name label like HPHA's — a different sub-element of the same
+ result row, but selecting it works the same way), then clicks Apply. The
+ fax-recipient selectors (change-recipient button, Facility tab, search
+ box) were renamed from "imaging..." to "generic..." since they're shared
+ dialog components now used by two forms, not imaging-specific — no
+ behavior change, just clearer naming. This completes the originally
+ planned Alt+1..6 form set, hence the version bump to 1.0.0.
 =====================================================================================
 */
 
@@ -320,8 +332,32 @@
           '"MMD" preset option'
         ),
     },
-    imagingChangeRecipient: {
-      label: '"No Recipient Selected" fax-recipient button (imaging auto-populate panel)',
+    gnmiResult: {
+      label: 'Imaging - GNMI Stratford template result',
+      find: () =>
+        uniqueAmongOrThrow(
+          Array.from(document.querySelectorAll('div.item-title.truncate.item-title-custom')).filter(
+            (el) => el.textContent && el.textContent.trim() === 'Imaging -Xray/US/Breast/BMD - GNMI Stratford (West-ON)'
+          ),
+          'Imaging - GNMI Stratford template result'
+        ),
+    },
+    gnmiRecipientResult: {
+      label: 'GNMI fax recipient result',
+      // Captured against the "item-details" (fax number) line rather than
+      // the facility-name line used for HPHA — a different sub-element of
+      // the same result row, but the fax number is a fine, effectively
+      // unique match target, and clicking it selects the row the same way.
+      find: () =>
+        uniqueAmongOrThrow(
+          Array.from(document.querySelectorAll('div.item-details.truncate')).filter(
+            (el) => el.textContent && el.textContent.trim() === 'Fax: +1 519 273 1928'
+          ),
+          'GNMI fax recipient result'
+        ),
+    },
+    genericChangeRecipient: {
+      label: '"No Recipient Selected" fax-recipient button (auto-populate panel)',
       // "embos" is a domain-specific styling class (not a generic reused
       // one like "btn"), so pairing it with the exact-text filter is extra
       // safe. "hover"/"active" from the capture are transient click-state
@@ -334,15 +370,15 @@
           '"No Recipient Selected" fax-recipient button'
         ),
     },
-    imagingRecipientSearchInput: {
-      label: 'Fax-recipient search box (imaging auto-populate panel)',
+    genericRecipientSearchInput: {
+      label: 'Fax-recipient search box (auto-populate panel)',
       find: () =>
         uniqueAmongOrThrow(
           document.querySelectorAll('div.ih-search-selector input.search-field[type="text"][name="value"]'),
           'Fax-recipient search box'
         ),
     },
-    imagingFacilityTab: {
+    genericFacilityTab: {
       label: '"Facility" tab (fax-recipient search — defaults to "Contact" otherwise)',
       // Matched on the stable classes only; "hover"/"active" from the
       // capture are transient click-state classes, not part of its
@@ -547,9 +583,9 @@
       autoRecipient: {
         // Pre-selects "HPHA XR" as the fax recipient so the later fax step
         // is already populated with the correct number.
-        changeButton: SELECTORS.imagingChangeRecipient,
-        tab: SELECTORS.imagingFacilityTab, // must switch off the default "Contact" tab first
-        searchInput: SELECTORS.imagingRecipientSearchInput,
+        changeButton: SELECTORS.genericChangeRecipient,
+        tab: SELECTORS.genericFacilityTab, // must switch off the default "Contact" tab first
+        searchInput: SELECTORS.genericRecipientSearchInput,
         searchText: 'xr',
         result: SELECTORS.imagingRecipientResult,
       },
@@ -557,6 +593,23 @@
     },
     // Alt+3 reserved — a second X-ray requisition is coming; send its
     // capture whenever it's ready and it'll slot in right here as hotkey '3'.
+    {
+      id: 'gnmi',
+      label: '🩻 Alt+3 — Imaging - GNMI Stratford (West-ON)',
+      hotkey: '3',
+      searchText: 'gnmi',
+      autoSelectResult: SELECTORS.gnmiResult, // proceeds automatically
+      autoRecipient: {
+        // Pre-selects the GNMI fax number so the later fax step is already
+        // populated with the correct recipient.
+        changeButton: SELECTORS.genericChangeRecipient, // generic dialog component, reused
+        tab: SELECTORS.genericFacilityTab, // must switch off the default "Contact" tab first
+        searchInput: SELECTORS.genericRecipientSearchInput, // generic dialog component, reused
+        searchText: 'gnmi',
+        result: SELECTORS.gnmiRecipientResult,
+      },
+      autoConfirm: SELECTORS.autoPopulateConfirm,
+    },
     {
       id: 'mmd',
       label: '📝 Alt+4 — Work and School Note MMD',
