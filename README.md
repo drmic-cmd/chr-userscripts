@@ -13,7 +13,8 @@ known-issue history.
 | Script | What it does | Hotkeys |
 |---|---|---|
 | [CHR Rx Renewal Assistant](chr-rx-renewal-assistant.user.js) | Walks the Rx renewal flow: open chart → Medications → Renew, Create Prescription, continue to Fax (highlights the pharmacy field for you to check), then Mark Done & Next. | Alt+1, Alt+2, Alt+3, Alt+4 |
-| [CHR Quick Pick (Forms)](chr-quick-pick.user.js) | One-click/keystroke shortcuts to open and pre-fill the bloodwork and imaging requisition templates. | Alt+5 (bloodwork), Alt+6 (imaging) |
+| [CHR Quick Pick (Forms)](chr-quick-pick.user.js) | One-click/keystroke shortcuts to open and pre-fill common requisitions and forms, with fax recipients pre-selected where applicable. | Alt+1 Bloodwork · Alt+2 Imaging (HPHA X-ray) · Alt+3 Imaging (GNMI Stratford) · Alt+4 Work and School Note MMD · Alt+5 PAP req · Alt+6 FIT - colorectal cancer req |
+| [CHR Selector Capture Tool](chr-selector-capture.user.js) | Not automation — a helper for building the other two. Alt+Click any element on a page to record its structure (tag/class/attributes/text) into a review panel, so a new form/step can be captured accurately and sent over to have a real quick pick or workflow step built from it. | Alt+Click to capture · Alt+Shift+C to toggle capture mode |
 
 ## Install (one click, per machine)
 
@@ -22,8 +23,13 @@ Then just open these links — Tampermonkey will pop up an install screen automa
 
 - **Rx Renewal Assistant:** https://raw.githubusercontent.com/drmic-cmd/chr-userscripts/main/chr-rx-renewal-assistant.user.js
 - **Quick Pick (Forms):** https://raw.githubusercontent.com/drmic-cmd/chr-userscripts/main/chr-quick-pick.user.js
+- **Selector Capture Tool:** https://raw.githubusercontent.com/drmic-cmd/chr-userscripts/main/chr-selector-capture.user.js
 
 Click **Install** on each. That's the whole setup — no copy-paste needed.
+
+Note: the capture tool is only needed on whichever machine you're actively using to
+build out a new form or workflow step — it doesn't need to go on every staff machine
+the way the other two do.
 
 ## Getting updates
 
