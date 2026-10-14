@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Fax Owner Tagger
 // @namespace    matt-family-med-stratford
-// @version      0.1.2
+// @version      0.1.3
 // @description  Marks unsorted faxes in the CHR inbox that CHR's own AI suggests belong to Dr. Matt MacDonald ("MM" = top suggestion, "MM?" = second suggestion). Uses only data CHR already provides; nothing leaves the browser and nothing about patients is stored.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -99,8 +99,8 @@
         id: it.id,
         token: it.resource_token,
         rid: it.resource_id,
-        times: [it.created_at, rs.date_of_added, rs.created_at].filter(Boolean),
-        titles: [rs.title, rs.name].filter(Boolean),
+        timeLabels: [it.created_at, rs.date_of_added, rs.created_at].filter(Boolean).map(timeLabel).filter(Boolean),
+        normTitles: [rs.title, rs.name].filter(Boolean).map(norm).filter(t => t.length > 10),
         unsorted: isUnsorted(it)
       });
       if (isUnsorted(it) && !verdicts.has(it.id) && !queued.has(it.id)) {
@@ -284,7 +284,7 @@
   }).observe(document.documentElement || document, { childList: true, subtree: true });
 
   // ---------- matching table rows to inbox items ----------
-  const norm = s => String(s || '').replace(/\s+/g, '').toLowerCase();
+  function norm(s) { return String(s || '').replace(/\s+/g, '').toLowerCase(); }
 
   function timeLabel(iso) {
     const d = new Date(iso);
@@ -327,9 +327,9 @@
     const matches = [];
     for (const it of items.values()) {
       if (!it.unsorted) continue;
-      const timeOk = it.times.some(t => { const l = timeLabel(t); return l && text.startsWith(l); });
+      const timeOk = it.timeLabels.some(l => text.startsWith(l));
       if (!timeOk) continue;
-      const titleOk = it.titles.some(t => norm(t).length > 10 && text.includes(norm(t)));
+      const titleOk = it.normTitles.some(t => text.includes(t));
       if (titleOk) matches.push(it);
     }
     if (matches.length === 1) return matches[0];
@@ -431,7 +431,7 @@
   function scheduleRefresh() {
     if (refreshPending) return;
     refreshPending = true;
-    requestAnimationFrame(() => { refreshPending = false; refresh(); });
+    setTimeout(() => { refreshPending = false; refresh(); }, 250);
   }
 
   function refresh() {
@@ -454,7 +454,7 @@
     diagEl.style.display = showDiag ? 'block' : 'none';
     if (showDiag) {
       setText(diagEl,
-        'MM Fax Tagger v0.1.2' +
+        'MM Fax Tagger v0.1.3' +
         '\nwindows hooked ' + diag.windows + ' · api requests seen ' + diag.apiSeen + ' · parse fails ' + diag.parseFails +
         '\ndata server ' + (apiOrigin ? (apiOrigin === location.origin ? 'same as page' : 'separate') : 'not seen yet') +
         ' · login headers learned ' + Object.keys(learnedHeaders).length +
@@ -468,7 +468,15 @@
   }
 
   function startDom() {
-    new MutationObserver(scheduleRefresh).observe(document.body, { childList: true, subtree: true });
+    new MutationObserver(muts => {
+      if (!items.size) return;
+      for (const m of muts) {
+        const t = m.target;
+        if (t && t.closest && t.closest('#mm-tagger-chip, #mm-tagger-diag')) continue;
+        scheduleRefresh();
+        return;
+      }
+    }).observe(document.body, { childList: true, subtree: true });
     document.addEventListener('scroll', scheduleRefresh, true);
     scheduleRefresh();
   }
