@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Fax Owner Tagger
 // @namespace    matt-family-med-stratford
-// @version      0.1.0
+// @version      0.1.2
 // @description  Marks unsorted faxes in the CHR inbox that CHR's own AI suggests belong to Dr. Matt MacDonald ("MM" = top suggestion, "MM?" = second suggestion). Uses only data CHR already provides; nothing leaves the browser and nothing about patients is stored.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -55,7 +55,11 @@
   let active = 0;
   let pathVariant = null;      // which item field the /view URL uses: 'token' or 'rid'
   let learnedHeaders = {};     // headers CHR's own app sends (kept in memory only)
-  const diag = { lists: 0, lookups: 0, lookupErrors: 0, rowsVue: 0, rowsText: 0, rowsNone: 0, lastErrors: [] };
+  let apiOrigin = null;        // CHR's data server (e.g. https://sfht.ca.inputhealth.com), learned from its own requests
+  let apiWithCreds = true;     // whether CHR's own requests send login cookies cross-site
+  const API_PATH = /\/inbox\/search|\/static-files\/[^/]+\/view/;
+  const diag = { lists: 0, lookups: 0, lookupErrors: 0, rowsVue: 0, rowsText: 0, rowsNone: 0, lastErrors: [],
+    windows: 0, apiSeen: 0, parseFails: 0, rowsFound: 0 };
 
   let dimOthers = false;
   try { dimOthers = localStorage.getItem(DIM_KEY) === '1'; } catch (e) { /* ignore */ }
@@ -130,7 +134,7 @@
   // ---------- background lookups ----------
   function viewUrl(it, variant) {
     const seg = variant === 'rid' ? it.rid : it.token;
-    return '/respondents/static-files/' + encodeURIComponent(seg) + '/view?item_id=' + encodeURIComponent(it.id);
+    return (apiOrigin || '') + '/respondents/static-files/' + encodeURIComponent(seg) + '/view?item_id=' + encodeURIComponent(it.id);
   }
 
   function getJson(url) {
@@ -138,6 +142,7 @@
       const xhr = new XMLHttpRequest();
       xhr.__mmOwn = true;
       xhr.open('GET', url);
+      if (apiOrigin && apiOrigin !== location.origin) xhr.withCredentials = apiWithCreds;
       xhr.setRequestHeader('Accept', 'application/json');
       xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
       Object.keys(learnedHeaders).forEach(h => {
@@ -197,7 +202,7 @@
   function handleResponse(url, text) {
     if (!/\/inbox\/search|\/static-files\/[^/]+\/view/.test(url)) return;
     let data;
-    try { data = JSON.parse(text); } catch (e) { return; }
+    try { data = JSON.parse(text); } catch (e) { diag.parseFails++; return; }
     if (/\/inbox\/search/.test(url)) ingestList(data);
     else learnFromPageView(url, data);
   }
@@ -205,6 +210,7 @@
   function hookWindow(w) {
     if (!w || w.__mmTaggerHooked) return;
     w.__mmTaggerHooked = true;
+    diag.windows++;
 
     const XP = w.XMLHttpRequest && w.XMLHttpRequest.prototype;
     if (XP) {
@@ -219,14 +225,17 @@
       };
       XP.send = function () {
         const info = this.__mm;
-        if (info && !this.__mmOwn && sameOrigin(info.url)) {
-          // Remember CHR's own auth/CSRF-style headers so our lookups look identical.
+        if (info && !this.__mmOwn && API_PATH.test(info.url)) {
+          diag.apiSeen++;
+          // Remember where CHR's data server is and how CHR talks to it, so our lookups look identical.
+          try { apiOrigin = new URL(info.url, location.href).origin; } catch (e) { /* ignore */ }
+          apiWithCreds = !!this.withCredentials || (apiOrigin === location.origin);
           const h = {};
           Object.keys(info.headers).forEach(k => {
             if (!/^(content-type|content-length|accept)$/i.test(k)) h[k] = info.headers[k];
           });
           if (Object.keys(h).length) learnedHeaders = h;
-          if (/\/inbox\/search|\/static-files\/[^/]+\/view/.test(info.url)) {
+          {
             const xhr = this;
             xhr.addEventListener('load', () => {
               try {
@@ -246,7 +255,9 @@
         const p = wFetch.apply(this, arguments);
         try {
           const url = typeof input === 'string' ? input : (input && input.url) || '';
-          if (/\/inbox\/search|\/static-files\/[^/]+\/view/.test(url)) {
+          if (API_PATH.test(url)) {
+            diag.apiSeen++;
+            try { apiOrigin = new URL(url, location.href).origin; } catch (e) { /* ignore */ }
             p.then(res => res.clone().text().then(t => handleResponse(url, t))).catch(() => {});
           }
         } catch (e) { /* ignore */ }
@@ -282,6 +293,17 @@
   }
 
   function itemFromVue(tr) {
+    const vn = tr.__vnode;
+    if (vn) {
+      const k = vn.key;
+      if (k != null) {
+        if (items.has(k)) return items.get(k);
+        if (items.has(Number(k))) return items.get(Number(k));
+      }
+      const vp = vn.props || {};
+      const r = vp.row || vp.item;
+      if (r && r.id != null && items.has(r.id)) return items.get(r.id);
+    }
     let c = tr.__vueParentComponent;
     for (let i = 0; c && i < 8; i++, c = c.parent) {
       const p = c.props || {};
@@ -307,7 +329,7 @@
       if (!it.unsorted) continue;
       const timeOk = it.times.some(t => { const l = timeLabel(t); return l && text.startsWith(l); });
       if (!timeOk) continue;
-      const titleOk = it.titles.some(t => text.includes(norm(t).slice(0, 25)));
+      const titleOk = it.titles.some(t => norm(t).length > 10 && text.includes(norm(t)));
       if (titleOk) matches.push(it);
     }
     if (matches.length === 1) return matches[0];
@@ -334,6 +356,8 @@
     const st = document.createElement('style');
     st.id = 'mm-tagger-style';
     st.textContent =
+      'tr[data-mm-row] > td{background:rgba(15,123,108,.12) !important;}' +
+      'tr[data-mm-row="MM?"] > td{background:rgba(15,123,108,.05) !important;}' +
       'td[data-mm]::before{content:attr(data-mm);display:inline-block;margin-right:6px;padding:1px 6px;' +
       'border-radius:9px;font:600 11px/16px system-ui,sans-serif;vertical-align:middle;}' +
       'td[data-mm="MM"]::before{background:#0f7b6c;color:#fff;}' +
@@ -363,20 +387,36 @@
       try { localStorage.setItem(DIM_KEY, dimOthers ? '1' : '0'); } catch (e) { /* ignore */ }
       scheduleRefresh();
     });
-    diagEl = document.createElement('pre');
-    diagEl.style.display = 'none';
-    chip.append(chipText, dimBtn, diagEl);
+    chip.append(chipText, dimBtn);
     document.body.appendChild(chip);
+
+    // Diagnostics box is separate from the chip so it can show even when nothing has been found.
+    diagEl = document.createElement('pre');
+    diagEl.id = 'mm-tagger-diag';
+    diagEl.style.cssText = 'position:fixed;left:16px;bottom:56px;z-index:2147483647;display:none;margin:0;' +
+      'padding:8px 10px;background:#fff;color:#222;border:1px solid #0f7b6c;border-radius:8px;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,.15);font:11px/1.4 ui-monospace,monospace;white-space:pre-wrap;user-select:text;';
+    document.body.appendChild(diagEl);
+  }
+
+  function badgeCell(tr) {
+    const tds = tr.querySelectorAll('td');
+    for (const td of tds) if (/incoming\s*fax/i.test(td.textContent)) return td;
+    return tds[3] || tds[tds.length - 1] || null;
   }
 
   function applyRow(tr) {
-    const td = tr.querySelector('td');
+    const td = badgeCell(tr);
     if (!td) return;
     const it = rowItem(tr);
     const v = it ? verdicts.get(it.id) : undefined;
     const label = v === 'mine' ? 'MM' : v === 'maybe' ? 'MM?' : null;
     if (label) { if (td.getAttribute('data-mm') !== label) td.setAttribute('data-mm', label); }
     else if (td.hasAttribute('data-mm')) td.removeAttribute('data-mm');
+    if (label) { if (tr.getAttribute('data-mm-row') !== label) tr.setAttribute('data-mm-row', label); }
+    else if (tr.hasAttribute('data-mm-row')) tr.removeAttribute('data-mm-row');
+    // Virtual scrolling reuses row elements, so clear any stale badge in other cells.
+    tr.querySelectorAll('td[data-mm]').forEach(c => { if (c !== td) c.removeAttribute('data-mm'); });
 
     // Dim only rows we are sure are someone else's (or already sorted). Never dim pending or unclear ones.
     const sortedOrOther = it ? (!it.unsorted || v === 'other') : false;
@@ -398,6 +438,7 @@
     injectStyle();
     ensureChip();
     const rows = document.querySelectorAll('tr.ih-table-row');
+    diag.rowsFound = rows.length;
     diag.rowsVue = diag.rowsText = diag.rowsNone = 0;
     rows.forEach(applyRow);
     if (!chip) return;
@@ -413,7 +454,13 @@
     diagEl.style.display = showDiag ? 'block' : 'none';
     if (showDiag) {
       setText(diagEl,
-        '\nlists ' + diag.lists + ' · items ' + items.size + ' · verdicts ' + verdicts.size +
+        'MM Fax Tagger v0.1.2' +
+        '\nwindows hooked ' + diag.windows + ' · api requests seen ' + diag.apiSeen + ' · parse fails ' + diag.parseFails +
+        '\ndata server ' + (apiOrigin ? (apiOrigin === location.origin ? 'same as page' : 'separate') : 'not seen yet') +
+        ' · login headers learned ' + Object.keys(learnedHeaders).length +
+        '\ninbox rows on screen ' + diag.rowsFound +
+        '\nlists ' + diag.lists + ' · items ' + items.size +
+        ' · unsorted ' + [...items.values()].filter(i => i.unsorted).length + ' · verdicts ' + verdicts.size +
         '\nlookups ' + diag.lookups + ' · errors ' + diag.lookupErrors + ' · url form ' + (pathVariant || '?') +
         '\nrows matched: vue ' + diag.rowsVue + ', text ' + diag.rowsText + ', none ' + diag.rowsNone +
         (diag.lastErrors.length ? '\n' + diag.lastErrors.join('\n') : ''));
@@ -428,9 +475,9 @@
   if (document.body) startDom(); else document.addEventListener('DOMContentLoaded', startDom);
 
   document.addEventListener('keydown', e => {
-    if (e.altKey && e.shiftKey && (e.key === 'M' || e.key === 'm')) {
+    if (e.altKey && e.shiftKey && (e.code === 'KeyM' || e.key === 'M' || e.key === 'm')) {
       showDiag = !showDiag;
-      scheduleRefresh();
+      refresh();
       e.preventDefault();
     }
   }, true);
