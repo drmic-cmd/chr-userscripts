@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CHR Fax Owner Tagger
 // @namespace    matt-family-med-stratford
-// @version      0.1.3
+// @version      0.1.4
 // @description  Marks unsorted faxes in the CHR inbox that CHR's own AI suggests belong to Dr. Matt MacDonald ("MM" = top suggestion, "MM?" = second suggestion). Uses only data CHR already provides; nothing leaves the browser and nothing about patients is stored.
 // @author       Matt
 // @match        https://*.inputhealth.com/*
@@ -48,6 +48,7 @@
   const DIM_KEY = 'mmFaxTagger.dimOthers';
 
   // ---------- state (no patient data kept) ----------
+  let currentIds = new Set();  // ids in the inbox list currently on screen
   const items = new Map();     // inbox item id -> minimal item info used for lookups
   const verdicts = new Map();  // inbox item id -> 'mine' | 'maybe' | 'other' | 'unknown' | 'error'
   const queued = new Set();
@@ -92,6 +93,7 @@
     const list = data && data.inbox_items;
     if (!Array.isArray(list)) return;
     diag.lists++;
+    currentIds = new Set(list.filter(it => it && it.id != null).map(it => it.id));
     list.forEach(it => {
       if (!it || it.id == null) return;
       const rs = it.resource_summary || {};
@@ -445,7 +447,7 @@
     chip.style.display = rows.length && items.size ? 'flex' : 'none';
 
     let mine = 0, maybe = 0, unclear = 0;
-    verdicts.forEach(v => { if (v === 'mine') mine++; else if (v === 'maybe') maybe++; else if (v === 'unknown' || v === 'error') unclear++; });
+    verdicts.forEach((v, id) => { if (!currentIds.has(id)) return; if (v === 'mine') mine++; else if (v === 'maybe') maybe++; else if (v === 'unknown' || v === 'error') unclear++; });
     const checking = queue.length + active;
     setText(chipText, 'MM: ' + mine + (maybe ? ' · MM?: ' + maybe : '') +
       (unclear ? ' · unclear: ' + unclear : '') + (checking ? ' · checking ' + checking + '…' : ''));
@@ -454,12 +456,12 @@
     diagEl.style.display = showDiag ? 'block' : 'none';
     if (showDiag) {
       setText(diagEl,
-        'MM Fax Tagger v0.1.3' +
+        'MM Fax Tagger v0.1.4' +
         '\nwindows hooked ' + diag.windows + ' · api requests seen ' + diag.apiSeen + ' · parse fails ' + diag.parseFails +
         '\ndata server ' + (apiOrigin ? (apiOrigin === location.origin ? 'same as page' : 'separate') : 'not seen yet') +
         ' · login headers learned ' + Object.keys(learnedHeaders).length +
         '\ninbox rows on screen ' + diag.rowsFound +
-        '\nlists ' + diag.lists + ' · items ' + items.size +
+        '\nlists ' + diag.lists + ' · items on screen list ' + currentIds.size + ' · items total ' + items.size +
         ' · unsorted ' + [...items.values()].filter(i => i.unsorted).length + ' · verdicts ' + verdicts.size +
         '\nlookups ' + diag.lookups + ' · errors ' + diag.lookupErrors + ' · url form ' + (pathVariant || '?') +
         '\nrows matched: vue ' + diag.rowsVue + ', text ' + diag.rowsText + ', none ' + diag.rowsNone +
